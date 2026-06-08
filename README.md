@@ -12,31 +12,47 @@ Give it a US address (or coordinates) and get a readable soil report: what soil 
 > what's the soil like at 1024 Olive Dr, Davis CA? could it support a vineyard?
 ```
 
-**Install — as a Claude Code plugin:**
+It also handles:
+- **Area / parcel** — paste a WKT or GeoJSON polygon (or give a radius) for area-weighted soils across a parcel, not just one point.
+- **Compare** — soils across two or more locations, side by side.
+- **Series lookup** — "tell me about the Yolo series" (by name, no address).
+
+### soil-carbon
+
+Estimate **soil organic carbon (SOC) stock** at any US location — tonnes C/ha at 0–30 cm and 0–100 cm — computed transparently from SSURGO horizon data (organic matter, bulk density, thickness, coarse-fragment correction), with the method shown.
+
+```
+> how much carbon is in the soil at 1024 Olive Dr, Davis CA?
+```
+
+## Install
+
+**As a Claude Code plugin** (gets both skills):
 
 ```
 /plugin marketplace add clevinson/soil-skills
-/plugin install soil-survey@soil-skills
+/plugin install soil@soil-skills
 ```
 
-Then ask in plain language ("what's the soil at 1024 Olive Dr, Davis CA?") or invoke explicitly with `/soil-survey:soil-survey <address>`.
+Then ask in plain language, or invoke explicitly: `/soil:soil-survey <address>` · `/soil:soil-carbon <address>`.
 
-**Install — via the skills CLI** (works across Claude Code, ChatGPT, Codex, and other agents that support the [Agent Skills](https://github.com/anthropics/skills) standard):
+**Via the skills CLI** (works across Claude Code, ChatGPT, Codex, and other agents that support the [Agent Skills](https://github.com/anthropics/skills) standard):
 
 ```bash
 npx skills add clevinson/soil-skills@soil-survey
+npx skills add clevinson/soil-skills@soil-carbon
 ```
 
 > **Network access:** these are external APIs. Sandboxed runtimes (ChatGPT, claude.ai) block outbound internet by default — allowlist `geocoding.geo.census.gov` and `sdmdataaccess.sc.egov.usda.gov`, then start a fresh conversation. Claude Code's shell is generally open.
 
 ## How it works
 
-The skill is pure markdown. At runtime the agent:
+The skills are pure markdown. At runtime the agent:
 
 1. Geocodes the address (Census Bureau geocoder, keyless)
 2. Finds the SSURGO map unit for the point (USDA Soil Data Access, T-SQL over HTTPS)
 3. Pulls map unit, component, horizon, and interpretation data with pre-tested SQL templates
-4. Writes the report — every number traceable to a live query response
+4. Writes the report — every number traceable to a live query response (soil-carbon additionally shows the SOC formula applied to those values)
 
 ## License & data
 

@@ -7,14 +7,14 @@
   "description": "Lightweight Claude skills for live USDA soil data (SSURGO) — no R, no soilDB, no installs.",
   "plugins": [
     {
-      "name": "soil-survey",
+      "name": "soil",
       "source": "./",
-      "description": "Look up the USDA soil survey (SSURGO) for any US location and generate a readable soil report.",
-      "version": "1.0.0",
+      "description": "Live USDA SSURGO soil tools: soil-survey (soil report, area/compare/series) and soil-carbon (soil organic carbon estimates).",
+      "version": "1.1.0",
       "author": {
         "name": "Cory Levinson"
       },
-      "keywords": ["soil", "ssurgo", "usda", "soil-survey"]
+      "keywords": ["soil", "ssurgo", "usda", "soil-survey", "soil-carbon", "soc"]
     }
   ]
 }
