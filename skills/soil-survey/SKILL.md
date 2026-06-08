@@ -1,6 +1,6 @@
 ---
 name: soil-survey
-description: Look up the USDA soil survey (SSURGO) for any US location and generate a readable soil report. Use when a user asks about the soil at an address, property, parcel, farm, or coordinates — what soil is there, or whether it suits septic systems, building, gardening, farming, vineyards, or other land uses.
+description: Look up the USDA soil survey (SSURGO) for any US location and generate a readable soil report. Use when a user asks about the soil at an address, property, parcel, farm, or coordinates — what soil is there, or whether it suits septic systems, building, gardening, farming, vineyards, or other land uses. Also handles area/parcel summaries (a pasted WKT or GeoJSON polygon, or a radius), comparing soils across multiple locations, and looking up a soil series by name.
 ---
 
 # Soil Survey
@@ -10,6 +10,15 @@ Readable soil report for any US location from live USDA data. Two keyless public
 **First, read `reference.md` in this skill's directory** — it has the tested SQL templates (Q1, Q2, Q3, Q3b, Q4, D), the HTTP request specs with shell + Python examples, the network-access note, table docs for ad-hoc queries, and glossaries. Do not compose SDA SQL from scratch when a template fits.
 
 These APIs are external; sandboxes (ChatGPT, claude.ai) block outbound internet by default. If a call fails with a network error, see the "Network access required" note in reference.md (allowlist the two domains, then retry in a fresh conversation).
+
+## Modes
+
+Pick based on what the user asked; all share the same plumbing (see reference.md):
+
+- **Point report** (default) — soil at a single address/coordinate. The workflow below.
+- **Area** — soils across a parcel/area. If the user pastes a WKT or GeoJSON polygon, use it; otherwise build a radius circle around the geocoded point. Run template **AQ** for the area-weighted map units, then Q2/Q3/Q4 on the dominant unit(s). Lead the report with the dominant-units table (map unit · acres · % of AOI).
+- **Compare** — two or more locations. Run the point workflow for each, then a side-by-side table + a short narrative diff.
+- **Series lookup** — the user names a soil series, not a place. Use template **SQ** (taxonomy + extent) plus a representative profile, and link the OSD / SoilWeb. No geocoding.
 
 ## Workflow
 

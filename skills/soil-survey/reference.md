@@ -172,6 +172,64 @@ WHERE c.mukey = {{mukey}} ORDER BY ci.mrulename
 
 Notable finds (confirmed in CA): `'AGR - California Revised Storie Index (CA)'`, `'VIN - Vinifera Wine Grape Site Desirability (Long)'` and other VIN rules, `'URB/REC - Camp Areas'`, `'URB/REC - Playgrounds'`, `'ENG - Ground-based Solar Arrays, Soil-based Anchor Systems'`, `'SOH - Soil Susceptibility to Compaction'`. Use these for user questions beyond the curated set (vineyards, solar farms, campgrounds...).
 
+## Area, compare & series modes
+
+### AQ — area-weighted soils over an AOI (polygon or radius)
+
+Use when the user wants the soils across a *parcel/area*, not a single point. Build the AOI as one WKT polygon, then run AQ (the AOI WKT is inlined twice). Geometry is used for the intersection; the result is cast to geography to get acres.
+
+Getting `{{aoi_wkt}}`:
+- **User pasted WKT polygon** → use as-is.
+- **User pasted GeoJSON** → convert the ring to WKT: `POLYGON((lon lat, lon lat, ...))` (GeoJSON coords are `[lon, lat]`; close the ring by repeating the first point).
+- **Radius around the geocoded point** (no polygon given) → build a circle polygon client-side. SDA does **not** allow `DECLARE`, so don't build it in SQL — pass a literal polygon.
+
+```python
+import math
+def circle_wkt(lon, lat, radius_m=150, n=32):
+    dlat = radius_m / 111320.0
+    dlon = radius_m / (111320.0 * math.cos(math.radians(lat)))
+    pts = [(lon + dlon*math.cos(2*math.pi*i/n), lat + dlat*math.sin(2*math.pi*i/n)) for i in range(n)]
+    pts.append(pts[0])
+    return "POLYGON((" + ", ".join(f"{x} {y}" for x, y in pts) + "))"
+```
+
+```sql
+SELECT mu.mukey, mu.muname,
+  SUM(GEOGRAPHY::STGeomFromText(
+        mp.mupolygongeo.STIntersection(GEOMETRY::STGeomFromText('{{aoi_wkt}}',4326)).STAsText(), 4326
+      ).STArea() * 0.000247105) AS acres
+FROM mupolygon mp JOIN mapunit mu ON mu.mukey = mp.mukey
+WHERE mp.mupolygongeo.STIntersects(GEOMETRY::STGeomFromText('{{aoi_wkt}}',4326)) = 1
+GROUP BY mu.mukey, mu.muname
+ORDER BY acres DESC
+```
+
+Returns each intersecting map unit with intersected acreage. Compute each unit's % of the AOI from the acres. Then for the dominant unit(s), run Q2/Q3/Q4 with their `mukey` for the usual detail. `0.000247105` converts m² → acres. If geography `STArea` errors on a self-intersecting / badly-oriented AOI, report it rather than guessing.
+
+### Compare mode
+
+No new SQL — run the full point workflow (Q1 → Q2/Q3/Q3b/Q4) for each location, then present a side-by-side table of the key properties and interpretations, followed by a short narrative diff.
+
+### SQ — series lookup (by name, not location)
+
+Use when the user names a soil series ("tell me about the Yolo series"). Summarize its taxonomy and extent across the database:
+
+```sql
+SELECT TOP 5 c.taxclname, c.drainagecl, COUNT(*) AS n_components, SUM(c.comppct_r) AS pct_sum
+FROM component c
+WHERE c.compname = '{{series}}' AND c.majcompflag = 'Yes'
+GROUP BY c.taxclname, c.drainagecl
+ORDER BY n_components DESC
+```
+
+For a representative profile, take one major component and run the Q3 horizon query against its `cokey`:
+```sql
+SELECT TOP 1 c.cokey FROM component c
+WHERE c.compname = '{{series}}' AND c.majcompflag = 'Yes'
+ORDER BY c.comppct_r DESC
+```
+Link to the official series description: `https://soilseries.sc.egov.usda.gov/OSD_Docs/<FIRST-LETTER>/<SERIES-UPPER>.html`, and UC Davis SoilWeb: `https://casoilresource.lawr.ucdavis.edu/sde/?series=<series>`. A series spans many map units nationwide — this is a representative summary, not a single mapped instance.
+
 ## Table relationships (for ad-hoc queries)
 
 ```
