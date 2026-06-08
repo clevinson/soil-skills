@@ -69,10 +69,11 @@ SELECT * FROM SDA_Get_Mukey_from_intersection_with_WktWgs84('POINT({{lon}} {{lat
 
 ### CQ — carbon inputs by horizon
 
-Pulls everything the carbon computation needs — **organic** (`om_r`) and **inorganic** (`caco3_r`). Coarse-fragment volume is summed from the child `chfrags` table via a correlated subquery (joining `chfrags` directly would multiply horizon rows).
+Pulls everything the carbon computation needs — **organic** (`om_r`), **inorganic** (`caco3_r`), and the map unit kind (`mukind`) that decides how to report (see "Reporting by map unit kind"). Coarse-fragment volume is summed from the child `chfrags` table via a correlated subquery (joining `chfrags` directly would multiply horizon rows).
 
 ```sql
 SELECT c.compname, c.comppct_r, c.majcompflag,
+       (SELECT mukind FROM mapunit WHERE mukey = {{mukey}}) AS mukind,
        ch.hzname, ch.hzdept_r, ch.hzdepb_r,
        ch.om_l, ch.om_r, ch.om_h,
        ch.caco3_l, ch.caco3_r, ch.caco3_h,
@@ -88,6 +89,7 @@ ORDER BY c.comppct_r DESC, ch.hzdept_r
 |---|---|
 | `compname` / `comppct_r` | Soil series / % of map unit |
 | `majcompflag` | "Yes" = major component |
+| `mukind` | Map unit kind: Consociation / Complex / Association / Undifferentiated group (drives reporting) |
 | `hzdept_r`, `hzdepb_r` | Horizon top & bottom depth (cm) |
 | `om_l` / `om_r` / `om_h` | Organic matter %, low / representative / high → organic carbon |
 | `caco3_l` / `caco3_r` / `caco3_h` | Calcium carbonate equivalent %, low / rep / high → inorganic carbon (null = none) |
@@ -98,7 +100,7 @@ ORDER BY c.comppct_r DESC, ch.hzdept_r
 
 ## Carbon computation
 
-Two pools — report both, plus their sum (total soil carbon). For each horizon of the dominant component (highest `comppct_r`), with thickness clipped to the target depth (e.g. for 0–100 cm, a 80–130 cm horizon contributes only 20 cm) and `(1 − fragvol/100)` removing coarse-fragment volume that holds no fine-earth carbon:
+Two pools — report both, plus their sum (total soil carbon). The formula below gives **one component's** stock from its horizons; *which* component(s) you report at a point depends on the map unit kind — see "Reporting by map unit kind" below. For each horizon, with thickness clipped to the target depth (e.g. for 0–100 cm, a 80–130 cm horizon contributes only 20 cm) and `(1 − fragvol/100)` removing coarse-fragment volume that holds no fine-earth carbon:
 
 **Organic (SOC):**
 1. Organic carbon: `OC% = om_r / 1.724` — the van Bemmelen factor (organic matter → organic carbon).
@@ -114,13 +116,27 @@ Dimensional check (both): %(g C/100 g) × (g/cm³) × cm over 1 ha = Mg C/ha.
 
 Skip horizons with null `dbthirdbar_r` (or, for a given pool, null `om_r` / `caco3_r`) and flag them — do not guess. Treat null `caco3_r` or `fragvol_r` as 0.
 
+### Reporting by map unit kind (point mode)
+
+A map unit is not always one soil. `mukind` (from CQ) decides how to report a point honestly — rather than blending dissimilar soils into a number that describes none of them:
+
+The real trigger is **how many major components (≥10%) the map unit actually has**, with `mukind` as the guide:
+
+- **Consociation** (~62% of US map units): one soil dominates. Report a **single headline** carbon for the dominant component; the per-horizon table illustrates it.
+- **Complex / Association / Undifferentiated group with ≥2 components ≥10%**: two or more *dissimilar* soils, and SSURGO does **not** say which one is at a given point. Do **not** report a single point value. Instead show a per-component table (component · % · SOC · SIC · total `[band]`) and give an honest **range** across the components — "≈ X–Y t C/ha depending which of these soils is at your spot." Use the dominant component's horizons as the worked illustration.
+- **Only one component ≥10%** (whatever the `mukind` — some complexes/undifferentiated groups resolve to a single major soil with sub-10% minors): treat it like a consociation — report that component as the headline, and note the minor components exist below the 10% cutoff.
+- **Null `mukind`** (rare): same logic — one major component → headline; two or more → components + range.
+- **Non-soil** map unit (e.g. Urban land, Water) with no horizon data: report that there is **no soil carbon to estimate**, not zero.
+
+Area mode is different and does aggregate across components and map units (see "Area mode") — there, integrating real ground in real proportions is legitimate; the blend describes actual carbon on the landscape, not a guess about one spot.
+
 ### Uncertainty band
 
 Report each figure as `representative [low – high]`. Compute **low** by using `om_l` and `caco3_l` in place of the `_r` values, and **high** with `om_h` / `caco3_h` — holding bulk density and fragments at representative. Carbon-stock uncertainty is dominated by the organic-matter (and carbonate) concentration range; bulk density's range adds only a few percent and its `_l`/`_h` are not physically paired with the OM extremes (in SSURGO, `om_h` may sit with `dbthirdbar_h`, the opposite of real soils), so do not combine all-low/all-high — vary only the carbon concentration.
 
 **State plainly what the band is and isn't.** It is the range implied by **SSURGO's own low/high organic-matter and carbonate estimates** for this map-unit component. It is **NOT** a statistical confidence interval (the L/H carry no stated probability), and it does **NOT** include the errors that often dominate:
 
-- *which* component you actually have at this point (map units are composites; we used the dominant one — a minor component can differ greatly);
+- *which* component you actually have at this point (for a consociation we report the dominant soil; for a complex/association we show each component because SSURGO can't place them — but even within a consociation, minor components differ);
 - map-delineation / positional uncertainty (whether the point is even in the right polygon);
 - bulk-density and coarse-fragment uncertainty (held at representative here);
 - temporal change, management, land-use history, and lab/pedon measurement error.
@@ -171,10 +187,24 @@ def carbon_stock(horizons, depth_limit_cm, om_key="om_r", caco3_key="caco3_r"):
         sic += ((h.get(caco3_key) or 0.0) * 0.12) * vol
     return soc, sic, gaps
 
-# representative + band (bulk density held at rep — vary only the carbon concentration)
-soc_r, sic_r, gaps = carbon_stock(horizons, 30)
-soc_lo, sic_lo, _  = carbon_stock(horizons, 30, "om_l", "caco3_l")
-soc_hi, sic_hi, _  = carbon_stock(horizons, 30, "om_h", "caco3_h")
+# per-component stock + band (CQ already returns every component >=10%, so this is free)
+def components_carbon(rows, depth):
+    comps = {}
+    for r in rows:
+        comps.setdefault((r["compname"], r["comppct_r"]), []).append(r)
+    out = []
+    for (name, pct), hz in comps.items():
+        soc, sic, _ = carbon_stock(hz, depth)
+        lo = sum(carbon_stock(hz, depth, "om_l", "caco3_l")[:2])   # SOC+SIC low
+        hi = sum(carbon_stock(hz, depth, "om_h", "caco3_h")[:2])   # SOC+SIC high
+        out.append({"component": name, "pct": pct, "soc": soc, "sic": sic,
+                    "total": soc + sic, "low": lo, "high": hi})
+    return sorted(out, key=lambda d: -d["pct"])
+
+comps = components_carbon(rows, 30)
+# Consociation -> report comps[0] (dominant) as the single headline.
+# Complex/Association/Undifferentiated -> report all comps; honest range = (min total, max total).
+# Area mode -> component-weighted map-unit mean = sum(c['pct']*c['total']) / sum(c['pct']).
 ```
 
 ## Area mode (carbon over a parcel/AOI)
@@ -206,15 +236,15 @@ For "how much carbon is in this parcel," area-weight the per-point estimate acro
    ORDER BY acres DESC
    ```
 
-3. **For each map unit**, run CQ with its `mukey` and compute the dominant-component SOC/SIC (rep + band) at the target depth.
+3. **For each map unit**, run CQ with its `mukey` and compute a **component-weighted** stock (rep + band) — `stock_unit = Σ(comppct_i × total_i) / Σ(comppct_i)` over its components (`components_carbon` above). Unlike point mode, area mode *does* blend components, because you're integrating real ground in real proportions — `mukind` does not gate this.
 
-4. **Aggregate** (per pool, and for low/high):
-   - **Area-weighted mean stock** (t C/ha, comparable to a point estimate) = `Σ(acres_i × stock_i) / Σ(acres_i)`.
-   - **Total stock** (t C, the absolute amount in the AOI) = `Σ(stock_i × acres_i × 0.404686)` — `0.404686` is ha per acre, since `stock_i` is t C/ha.
+4. **Aggregate across map units** (per pool, and for low/high):
+   - **Area-weighted mean stock** (t C/ha) = `Σ(acres_i × stock_unit_i) / Σ(acres_i)`.
+   - **Total stock** (t C, the absolute amount in the AOI) = `Σ(stock_unit_i × acres_i × 0.404686)` — `0.404686` is ha per acre, since stock is t C/ha.
 
-   Report the per-map-unit table (unit · acres · t C/ha), then the area-weighted mean `rep [low–high]` and the total tonnes. Tested live (150 m circle near Davis, 0–30 cm): units 67 / 55 / 16 t C/ha → mean **61 [43–79]**, total **427 t C** over 7.0 ha.
+   Report the per-map-unit table (unit · acres · t C/ha), then the area-weighted mean `rep [low–high]` and the total tonnes. (A prior dominant-component-only test of the 150 m Davis circle gave mean 61 [43–79], total 427 t C over 7.0 ha; component-weighting shifts these modestly.)
 
-   Extra area-mode caveat: this uses each map unit's **dominant component only** (minor components ignored) — another simplification on top of the point-mode caveats below.
+   Components with no horizon data (miscellaneous areas — Rock outcrop, Water) contribute ~0 carbon; if they're a non-trivial share of a map unit, say so rather than silently dropping them.
 
 ## Caveats (always surface)
 
