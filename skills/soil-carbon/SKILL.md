@@ -1,6 +1,6 @@
 ---
 name: soil-carbon
-description: Estimate soil carbon stock at any US location from live USDA SSURGO data — both organic (SOC) and inorganic (SIC, carbonates). Use when a user asks about soil carbon, carbon stock, carbon sequestration potential, or a carbon baseline at an address, parcel, farm, or coordinates — how many tonnes of carbon are in the soil.
+description: Estimate soil carbon stock at any US location from live USDA SSURGO data — both organic (SOC) and inorganic (SIC, carbonates). Use when a user asks about soil carbon, carbon stock, carbon sequestration potential, or a carbon baseline at an address, parcel, farm, or coordinates — how many tonnes of carbon are in the soil. Handles a single point or an area/parcel (a pasted WKT or GeoJSON polygon, or a radius) for area-weighted and total carbon.
 ---
 
 # Soil Carbon
@@ -11,7 +11,12 @@ Estimate soil carbon stock (t C/ha) for any US location from live USDA data — 
 
 These APIs are external; sandboxes (ChatGPT, claude.ai) block outbound internet by default. On a network error, see the "Network access required" note in reference.md.
 
-## Workflow
+## Modes
+
+- **Point** (default) — carbon at a single address/coordinate. The workflow below.
+- **Area / parcel** — carbon across an AOI. If the user pastes a WKT or GeoJSON polygon, use it; otherwise build a radius circle around the geocoded point. Follow "Area mode" in reference.md: intersect the AOI to get map units + acres, compute each unit's dominant-component carbon, then report the **area-weighted mean** (`rep [low–high]`, t C/ha) **and the total tonnes** in the AOI, with a per-map-unit table.
+
+## Workflow (point mode)
 
 1. **Get coordinates.** Lat/lon → use directly. Address → Census geocoder. No match → ask for a cross-street or coordinates.
 2. **Point → map unit:** template Q1. ⚠️ `POINT(lon lat)` — longitude first. Empty `{}` → outside SSURGO coverage: say so.

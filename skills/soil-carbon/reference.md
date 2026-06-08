@@ -177,6 +177,45 @@ soc_lo, sic_lo, _  = carbon_stock(horizons, 30, "om_l", "caco3_l")
 soc_hi, sic_hi, _  = carbon_stock(horizons, 30, "om_h", "caco3_h")
 ```
 
+## Area mode (carbon over a parcel/AOI)
+
+For "how much carbon is in this parcel," area-weight the per-point estimate across all map units intersecting an AOI.
+
+1. **Build the AOI as one WKT polygon** — user-pasted WKT → use as-is; GeoJSON → convert the ring to `POLYGON((lon lat, ...))` (GeoJSON is `[lon, lat]`; close the ring); no polygon → a radius circle around the geocoded point:
+
+   ```python
+   import math
+   def circle_wkt(lon, lat, radius_m=150, n=32):
+       dlat = radius_m / 111320.0
+       dlon = radius_m / (111320.0 * math.cos(math.radians(lat)))
+       pts = [(lon + dlon*math.cos(2*math.pi*i/n), lat + dlat*math.sin(2*math.pi*i/n)) for i in range(n)]
+       pts.append(pts[0])
+       return "POLYGON((" + ", ".join(f"{x} {y}" for x, y in pts) + "))"
+   ```
+
+2. **Intersect with SSURGO** to get each map unit's intersected acreage (inline the AOI WKT twice; SDA forbids `DECLARE`):
+
+   ```sql
+   SELECT mu.mukey, mu.muname,
+     SUM(GEOGRAPHY::STGeomFromText(
+           mp.mupolygongeo.STIntersection(GEOMETRY::STGeomFromText('{{aoi_wkt}}',4326)).STAsText(), 4326
+         ).STArea() * 0.000247105) AS acres
+   FROM mupolygon mp JOIN mapunit mu ON mu.mukey = mp.mukey
+   WHERE mp.mupolygongeo.STIntersects(GEOMETRY::STGeomFromText('{{aoi_wkt}}',4326)) = 1
+   GROUP BY mu.mukey, mu.muname
+   ORDER BY acres DESC
+   ```
+
+3. **For each map unit**, run CQ with its `mukey` and compute the dominant-component SOC/SIC (rep + band) at the target depth.
+
+4. **Aggregate** (per pool, and for low/high):
+   - **Area-weighted mean stock** (t C/ha, comparable to a point estimate) = `Σ(acres_i × stock_i) / Σ(acres_i)`.
+   - **Total stock** (t C, the absolute amount in the AOI) = `Σ(stock_i × acres_i × 0.404686)` — `0.404686` is ha per acre, since `stock_i` is t C/ha.
+
+   Report the per-map-unit table (unit · acres · t C/ha), then the area-weighted mean `rep [low–high]` and the total tonnes. Tested live (150 m circle near Davis, 0–30 cm): units 67 / 55 / 16 t C/ha → mean **61 [43–79]**, total **427 t C** over 7.0 ha.
+
+   Extra area-mode caveat: this uses each map unit's **dominant component only** (minor components ignored) — another simplification on top of the point-mode caveats below.
+
 ## Caveats (always surface)
 
 - SSURGO values are **representative/estimated**, not measured at this point. These are **modeled baselines**, not field measurements.

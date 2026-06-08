@@ -19,7 +19,7 @@ It also handles:
 
 ### soil-carbon
 
-Estimate **soil organic carbon (SOC) stock** at any US location — tonnes C/ha at 0–30 cm and 0–100 cm — computed transparently from SSURGO horizon data (organic matter, bulk density, thickness, coarse-fragment correction), with the method shown.
+Estimate **soil carbon stock** at any US location — **organic (SOC) and inorganic (SIC, carbonates)** — in tonnes C/ha at 0–30 cm and 0–100 cm, computed transparently from SSURGO horizon data (organic matter, carbonate, bulk density, thickness, coarse-fragment correction), each with an uncertainty band from SSURGO's low/high estimates and the method shown. Works for a single point or an **area/parcel** (pasted WKT/GeoJSON polygon or a radius) — area-weighted mean and total tonnes.
 
 ```
 > how much carbon is in the soil at 1024 Olive Dr, Davis CA?
