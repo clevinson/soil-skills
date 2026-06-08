@@ -1,0 +1,13 @@
+{
+  "name": "soil-survey",
+  "description": "Look up the USDA soil survey (SSURGO) for any US location and generate a readable soil report — properties, land-use suitability, farmland ratings, and hazards.",
+  "version": "1.0.0",
+  "author": {
+    "name": "Cory Levinson",
+    "email": "cjlevinson@gmail.com"
+  },
+  "homepage": "https://github.com/clevinson/soil-skills",
+  "repository": "https://github.com/clevinson/soil-skills",
+  "license": "MIT",
+  "keywords": ["soil", "ssurgo", "usda", "soil-survey", "geospatial", "agriculture", "land-use"]
+}

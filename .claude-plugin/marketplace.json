@@ -1,0 +1,20 @@
+{
+  "name": "soil-skills",
+  "owner": {
+    "name": "Cory Levinson",
+    "email": "cjlevinson@gmail.com"
+  },
+  "description": "Lightweight Claude skills for live USDA soil data (SSURGO) — no R, no soilDB, no installs.",
+  "plugins": [
+    {
+      "name": "soil-survey",
+      "source": "./",
+      "description": "Look up the USDA soil survey (SSURGO) for any US location and generate a readable soil report.",
+      "version": "1.0.0",
+      "author": {
+        "name": "Cory Levinson"
+      },
+      "keywords": ["soil", "ssurgo", "usda", "soil-survey"]
+    }
+  ]
+}
