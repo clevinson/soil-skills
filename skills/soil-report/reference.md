@@ -1,32 +1,65 @@
 # SSURGO Query Reference
 
-Everything here runs with `curl` against two keyless public APIs. All SQL templates were tested live against SDA (2026-06-06).
+Two keyless public APIs. Each is described as an HTTP request first; use whichever transport your runtime has — `curl` if you have a shell (Claude Code), Python if you're in a sandbox (ChatGPT, claude.ai). All SQL templates were tested live against SDA (2026-06-06).
+
+## Network access required
+
+These APIs are external. Skill sandboxes block outbound internet by default (only package-manager domains). If calls fail with a network/connection error, the host's domain allowlist must include — or be set to allow all domains:
+
+- `geocoding.geo.census.gov`
+- `sdmdataaccess.sc.egov.usda.gov`
+
+In Claude Code's shell this is generally open. On claude.ai / ChatGPT, enable network access for the skill (allowlist the two domains above), then start a fresh conversation. If you cannot enable it, say so plainly — the skill cannot fabricate soil data.
 
 ## APIs
 
 ### Census Geocoder (address → coordinates)
 
-```bash
-curl -s "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address={{URL_ENCODED_ADDRESS}}&benchmark=Public_AR_Current&format=json"
-```
+**Request:** `GET https://geocoding.geo.census.gov/geocoder/locations/onelineaddress`
+with query params `address={{URL_ENCODED_ADDRESS}}`, `benchmark=Public_AR_Current`, `format=json`
 
 - Free, no key. **US addresses only** (fine — SSURGO is US-only).
 - Success: `result.addressMatches[0].coordinates` → `x` = longitude, `y` = latitude; `matchedAddress` shows what was actually matched.
 - Miss: `addressMatches` is `[]`. Common for campus buildings, PO boxes, new construction. Ask the user for a cross-street, city, or coordinates.
 
+*Shell:*
+```bash
+curl -s "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?address={{URL_ENCODED_ADDRESS}}&benchmark=Public_AR_Current&format=json"
+```
+*Python:*
+```python
+import json, urllib.parse, urllib.request
+params = urllib.parse.urlencode({"address": address, "benchmark": "Public_AR_Current", "format": "json"})
+url = "https://geocoding.geo.census.gov/geocoder/locations/onelineaddress?" + params
+resp = json.loads(urllib.request.urlopen(url, timeout=60).read())
+matches = resp["result"]["addressMatches"]  # [] = no match
+```
+
 ### Soil Data Access — SDA (all soil queries)
 
+**Request:** `POST https://sdmdataaccess.sc.egov.usda.gov/Tabular/post.rest`
+- Header: `Content-Type: application/json`
+- Body (JSON): `{"query": "<SQL>", "format": "JSON+COLUMNNAME"}`
+- Response: `{"Table": [[column names], [row1...], [row2...]]}` — first array is headers.
+- **No rows → response is `{}`** (empty object, not an empty Table).
+
+Universal: accepts T-SQL (SQL Server dialect), no key, no auth. It is a government SQL Server — occasionally slow or down; use a ~60s timeout, and on failure report honestly and offer to retry.
+
+*Shell:* the body is a single-quoted JSON string, so escape single quotes inside SQL by doubling (`''`) and keep SQL on one line.
 ```bash
-curl -s -X POST "https://sdmdataaccess.sc.egov.usda.gov/Tabular/post.rest" \
+curl -s --max-time 60 -X POST "https://sdmdataaccess.sc.egov.usda.gov/Tabular/post.rest" \
   -H "Content-Type: application/json" \
   -d '{"query":"{{SQL_ON_ONE_LINE}}","format":"JSON+COLUMNNAME"}'
 ```
-
-- Accepts T-SQL (SQL Server dialect). No key, no auth.
-- Response: `{"Table": [[column names], [row1...], [row2...]]}` — first array is headers.
-- **No rows → response is `{}`** (empty object, not an empty Table).
-- Escape single quotes inside SQL by doubling (`''`). Keep SQL on one line in the JSON body.
-- It is a government SQL Server: occasionally slow or down. Add `--max-time 60`; on failure, report honestly and offer to retry.
+*Python:* pass a dict — `json.dumps` handles all escaping, and SQL may be multi-line. No shell quoting rules apply.
+```python
+import json, urllib.request
+url = "https://sdmdataaccess.sc.egov.usda.gov/Tabular/post.rest"
+body = json.dumps({"query": sql, "format": "JSON+COLUMNNAME"}).encode()
+req = urllib.request.Request(url, data=body, headers={"Content-Type": "application/json"})
+resp = json.loads(urllib.request.urlopen(req, timeout=60).read())
+rows = resp.get("Table", [])  # [] / no "Table" key = no rows
+```
 
 ## Query templates
 

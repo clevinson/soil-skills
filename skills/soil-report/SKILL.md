@@ -5,9 +5,11 @@ description: Generate a soil report for any US location by querying live USDA SS
 
 # Soil Report
 
-Readable soil report for any US location from live USDA data. Two keyless public APIs via `curl`. Zero installs.
+Readable soil report for any US location from live USDA data. Two keyless public HTTP APIs — call them with `curl` (shell) or Python (sandbox), whichever your runtime has. Zero installs.
 
-**First, read `reference.md` in this skill's directory** — it has the tested SQL templates (Q1, Q2, Q3, Q3b, Q4, D), the curl scaffolds, table docs for ad-hoc queries, and glossaries. Do not compose SDA SQL from scratch when a template fits.
+**First, read `reference.md` in this skill's directory** — it has the tested SQL templates (Q1, Q2, Q3, Q3b, Q4, D), the HTTP request specs with shell + Python examples, the network-access note, table docs for ad-hoc queries, and glossaries. Do not compose SDA SQL from scratch when a template fits.
+
+These APIs are external; sandboxes (ChatGPT, claude.ai) block outbound internet by default. If a call fails with a network error, see the "Network access required" note in reference.md (allowlist the two domains, then retry in a fresh conversation).
 
 ## Workflow
 
@@ -41,6 +43,6 @@ For non-soil map units (Water, Urban land, NOTCOM, Pits): report what the map un
 
 - **Never fabricate a value.** Every number traces to a query response in this conversation. Null field → "not populated in SSURGO", not a guess.
 - **Always include the map-scale caveat.**
-- **API failure → report it honestly** (SDA has bad days; use `--max-time 60`). Offer to retry. Never substitute remembered soil facts for live data.
+- **API failure → report it honestly** (SDA has bad days; use a ~60s timeout). A network/connection error usually means sandbox internet is blocked — point the user to the allowlist note in reference.md. Offer to retry. Never substitute remembered soil facts for live data.
 - Show original SSURGO units (cm, µm/s, cm/cm); add friendly conversions in parentheses where it helps.
 - Questions beyond the templates (vineyards, solar, compaction...): run discovery template D — survey areas carry state-specific interpretations — then query the exact rule name it returns.
