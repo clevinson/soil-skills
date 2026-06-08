@@ -15,18 +15,21 @@ These APIs are external; sandboxes (ChatGPT, claude.ai) block outbound internet 
 
 1. **Get coordinates.** Lat/lon → use directly. Address → Census geocoder. No match → ask for a cross-street or coordinates.
 2. **Point → map unit:** template Q1. ⚠️ `POINT(lon lat)` — longitude first. Empty `{}` → outside SSURGO coverage: say so.
-3. **Pull carbon inputs:** template CQ → per-horizon organic matter, **carbonate (caco3_r)**, bulk density, and coarse fragments for components ≥ 10%.
+3. **Pull carbon inputs:** template CQ → per-horizon organic matter (`om_l/_r/_h`), **carbonate (`caco3_l/_r/_h`)**, bulk density, and coarse fragments for components ≥ 10%.
 4. **Compute both pools** for the dominant component using the method in reference.md, per horizon × `bulk density × thickness × (1 − frag/100)`, summed to **0–30 cm** and **0–100 cm** (clip the deepest horizon to the target depth):
    - **SOC** = `(om_r / 1.724)` ×  …
    - **SIC** = `(caco3_r × 0.12)` × …  (carbonate is 12% C by mass)
    - **Total** = SOC + SIC.
+   - **Uncertainty band:** recompute low/high using `om_l/caco3_l` and `om_h/caco3_h` (bulk density held at representative). Report each figure as `rep [low–high]`.
 5. **Write the report.**
 
 ## Report format
 
-**🌍 Soil carbon estimate** — lead with the headline at **0–30 cm** and **0–100 cm** in t C/ha (0–30 cm is the standard/IPCC depth), for the dominant soil (series + % of map unit): give **SOC, SIC, and total** separately. If SIC is non-trivial (calcareous soils), call that out — it's often missed. If other components ≥ 10% exist, name them and note their carbon may differ.
+**🌍 Soil carbon estimate** — lead with the headline at **0–30 cm** and **0–100 cm** in t C/ha (0–30 cm is the standard/IPCC depth), for the dominant soil (series + % of map unit): give **SOC, SIC, and total**, each as **`rep [low–high]`**. If SIC is non-trivial (calcareous soils), call that out — it's often missed. If other components ≥ 10% exist, name them and note their carbon may differ.
 
 **🧮 How it's computed** — a per-horizon table: depth · OM% · OC% · CaCO₃% · bulk density · coarse-frag % · SOC · SIC (t C/ha). Then the one-line formulas so the math is auditable.
+
+**📊 What the range means** — one or two sentences: the band is **SSURGO's own low/high organic-matter and carbonate estimates**, not a confidence interval. It excludes the errors that often dominate — which component you actually have, map/positional error, bulk-density and temporal change — so **real uncertainty is wider**. Don't let the band imply false precision.
 
 **📍 Context** — the map unit name and the SSURGO map-scale caveat. Optionally express the total as CO₂-equivalent (× 3.67) if the user cares about climate accounting — but see the rule below on not conflating the two pools.
 
@@ -38,5 +41,6 @@ If a horizon has null bulk density (or null OM / CaCO₃ for a pool), exclude it
 
 - **Never fabricate a value.** Every number traces to a CQ response or the documented formula applied to it. Null inputs → flag and exclude, never guess (null `caco3_r` = no inorganic carbon).
 - **Always show the method and the "estimate, not measurement" caveat**, and **keep SOC and SIC distinct** — that distinction is the integrity core of a soil-carbon number.
+- **The band is SSURGO's stated property range, not a confidence interval.** Never present it as "±X% certain" or a guarantee; say true uncertainty is wider.
 - **API failure → report it honestly.** A network error usually means blocked sandbox internet (see reference.md). Never substitute remembered carbon figures for live data.
 - Show t C/ha (= Mg C/ha); add conversions (kg C/m², CO₂-eq) where they help.
