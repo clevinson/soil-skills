@@ -1,2 +1,5 @@
 .DS_Store
 *.zip
+
+# Local planning/spec docs (superpowers workflow) — keep out of the repo
+docs/superpowers/
