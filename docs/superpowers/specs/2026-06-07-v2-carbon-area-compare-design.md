@@ -8,7 +8,7 @@
 
 Four additions, two deliverables:
 
-1. **`soil-carbon`** — a NEW sibling skill: address → estimated soil organic carbon (SOC) stock.
+1. **`soil-carbon`** — a NEW sibling skill: address → estimated soil carbon stock, both **organic** (SOC, from `om_r`) and **inorganic** (SIC, from `caco3_r` carbonate × 0.12), reported separately plus a total. SIC matters in arid/calcareous soils (can be ~40%+ of total; validated on Harkey, NM).
 2. **`soil-survey` upgrades** — three new modes folded into the existing skill:
    - **Area** — area-weighted soils across an AOI (pasted WKT/GeoJSON polygon, or a radius around the point).
    - **Compare** — run the report for 2+ locations, diff them.

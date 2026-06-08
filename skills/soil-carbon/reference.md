@@ -1,6 +1,6 @@
 # Soil Carbon Query Reference
 
-Estimates soil organic carbon (SOC) stock from USDA SSURGO, computed transparently from horizon data. Two keyless public APIs; call them with `curl` (shell) or Python (sandbox). Tested live against SDA (2026-06-07).
+Estimates soil carbon stock from USDA SSURGO — **organic** (SOC, from organic matter) and **inorganic** (SIC, from carbonates) — computed transparently from horizon data. Two keyless public APIs; call them with `curl` (shell) or Python (sandbox). Tested live against SDA (2026-06-07).
 
 ## Network access required
 
@@ -69,12 +69,12 @@ SELECT * FROM SDA_Get_Mukey_from_intersection_with_WktWgs84('POINT({{lon}} {{lat
 
 ### CQ — carbon inputs by horizon
 
-Pulls everything the SOC computation needs. Coarse-fragment volume is summed from the child `chfrags` table via a correlated subquery (joining `chfrags` directly would multiply horizon rows).
+Pulls everything the carbon computation needs — **organic** (`om_r`) and **inorganic** (`caco3_r`). Coarse-fragment volume is summed from the child `chfrags` table via a correlated subquery (joining `chfrags` directly would multiply horizon rows).
 
 ```sql
 SELECT c.compname, c.comppct_r, c.majcompflag,
        ch.hzname, ch.hzdept_r, ch.hzdepb_r,
-       ch.om_r, ch.dbthirdbar_r,
+       ch.om_r, ch.caco3_r, ch.dbthirdbar_r,
        (SELECT SUM(cf.fragvol_r) FROM chfrags cf WHERE cf.chkey = ch.chkey) AS fragvol_r
 FROM component c
 JOIN chorizon ch ON c.cokey = ch.cokey
@@ -87,63 +87,82 @@ ORDER BY c.comppct_r DESC, ch.hzdept_r
 | `compname` / `comppct_r` | Soil series / % of map unit |
 | `majcompflag` | "Yes" = major component |
 | `hzdept_r`, `hzdepb_r` | Horizon top & bottom depth (cm) |
-| `om_r` | Organic matter, % by weight (representative) |
+| `om_r` | Organic matter, % by weight (representative) → organic carbon |
+| `caco3_r` | Calcium carbonate equivalent, % by weight (representative) → inorganic carbon (null = none) |
 | `dbthirdbar_r` | Bulk density at ⅓ bar, g/cm³ (representative) |
 | `fragvol_r` (summed) | Coarse fragment volume, % (null = none) |
 
-## SOC computation
+## Carbon computation
 
-For each horizon of the dominant component (highest `comppct_r`):
+Two pools — report both, plus their sum (total soil carbon). For each horizon of the dominant component (highest `comppct_r`), with thickness clipped to the target depth (e.g. for 0–100 cm, a 80–130 cm horizon contributes only 20 cm) and `(1 − fragvol/100)` removing coarse-fragment volume that holds no fine-earth carbon:
 
-1. **Organic carbon:** `OC% = om_r / 1.724` — the van Bemmelen factor converting organic matter to organic carbon.
-2. **Thickness:** `hzdepb_r − hzdept_r`, clipped so it does not extend past the target depth (e.g. for 0–100 cm, a 80–130 cm horizon contributes only 20 cm).
-3. **Horizon stock (t C/ha):** `OC% × dbthirdbar_r × thickness_cm × (1 − fragvol/100)`.
-   Dimensional check: %(g C/100 g) × (g/cm³) × cm over 1 ha = Mg C/ha. Coarse fragments hold no carbon, so the `(1 − fragvol/100)` term removes their volume.
-4. **Total:** sum horizon stocks to **0–30 cm** (IPCC / standard reporting depth) and **0–100 cm** (fuller profile). Report both.
+**Organic (SOC):**
+1. Organic carbon: `OC% = om_r / 1.724` — the van Bemmelen factor (organic matter → organic carbon).
+2. Horizon stock (t C/ha): `OC% × dbthirdbar_r × thickness_cm × (1 − fragvol/100)`.
 
-Skip horizons with null `om_r` or `dbthirdbar_r` and flag them — do not guess. Treat null `fragvol_r` as 0.
+**Inorganic (SIC):**
+1. Carbonate carbon: `IC% = caco3_r × 0.1200` — CaCO₃ is 12.0% carbon by mass (12.01 / 100.09 g·mol⁻¹), assuming carbonate is calcite.
+2. Horizon stock (t C/ha): `IC% × dbthirdbar_r × thickness_cm × (1 − fragvol/100)`.
 
-### Worked example (mukey 459310, Zamora loam, Davis CA — tested live)
+Dimensional check (both): %(g C/100 g) × (g/cm³) × cm over 1 ha = Mg C/ha.
 
-| Horizon | Depth cm | OM% | OC% (OM/1.724) | BD g/cm³ | Frag% | Stock t C/ha |
+**Totals:** sum each pool over horizons to **0–30 cm** (IPCC / standard reporting depth) and **0–100 cm** (fuller profile). Total soil carbon = SOC + SIC. Report SOC, SIC, and total separately — they behave very differently (see caveats).
+
+Skip horizons with null `dbthirdbar_r` (or, for a given pool, null `om_r` / `caco3_r`) and flag them — do not guess. Treat null `caco3_r` or `fragvol_r` as 0.
+
+### Worked examples (tested live)
+
+**Zamora loam, Davis CA (mukey 459310)** — non-calcareous, SIC ≈ 0:
+
+| Horizon | Depth cm | OM% | OC% | CaCO₃% | BD | Frag% | SOC t C/ha |
+|---|---|---|---|---|---|---|---|
+| H1 | 0–25 | 3.0 | 1.74 | 0 | 1.48 | 0 | 64.4 |
+| H2 | 25–102 | 0.75 | 0.435 | 0 | 1.40 | 0 | 45.7 (to 100 cm) |
+
+→ 0–30 cm: **SOC 67, SIC 0, total 67** · 0–100 cm: **SOC 110, SIC 0, total 110** t C/ha.
+
+**Harkey, near Las Cruces NM (mukey 634572)** — calcareous; SIC is ~40% of total:
+
+| Horizon | Depth cm | OM% | CaCO₃% | BD | SOC | SIC |
 |---|---|---|---|---|---|---|
-| H1 | 0–25 | 3.0 | 1.74 | 1.48 | 0 | 64.4 |
-| H2 | 25–102 | 0.75 | 0.435 | 1.40 | 0 | 46.9 (full) / to 100 cm: 45.7 |
-| H3 | 102–130 | 0.25 | 0.145 | 1.45 | 5 | 5.6 |
-| H4 | 130–152 | 0.25 | 0.145 | 1.53 | 28 | 3.5 |
+| H1 | 0–30 | 0.9 | 3 | 1.50 | — | — |
+| H2 | 30–152 | 0.9 | 3 | 1.45 | — | — |
 
-**0–30 cm ≈ 67 t C/ha · 0–100 cm ≈ 110 t C/ha.** (0–30 takes H1 fully plus 5 cm of H2.)
+→ 0–30 cm: **SOC 23.5, SIC 16.2, total 39.7** · 0–100 cm: **SOC 76.5, SIC 52.7, total 129.2** t C/ha.
 
 ### Python helper (optional)
 
 ```python
-def soc_stock(horizons, depth_limit_cm):
-    """horizons: list of dicts with hzdept_r, hzdepb_r, om_r, dbthirdbar_r, fragvol_r (all numeric or None)."""
-    total, gaps = 0.0, []
+def carbon_stock(horizons, depth_limit_cm):
+    """horizons: dicts with hzdept_r, hzdepb_r, om_r, caco3_r, dbthirdbar_r, fragvol_r (numeric or None).
+    Returns (soc, sic, gaps) in tonnes C/ha."""
+    soc = sic = 0.0
+    gaps = []
     for h in horizons:
         top, bot = h["hzdept_r"], h["hzdepb_r"]
-        if top is None or bot is None:
+        bd = h["dbthirdbar_r"]
+        if top is None or bot is None or bd is None:
+            if not (top is None or bot is None):
+                gaps.append(h.get("hzname"))
             continue
         bot = min(bot, depth_limit_cm)
         if bot <= top:
             continue
-        thick = bot - top
-        om, bd = h["om_r"], h["dbthirdbar_r"]
-        if om is None or bd is None:
-            gaps.append(h.get("hzname"))
-            continue
-        frag = h["fragvol_r"] or 0.0
-        total += (om / 1.724) * bd * thick * (1 - frag / 100.0)
-    return total, gaps   # tonnes C/ha, list of skipped horizons
+        vol = bd * (bot - top) * (1 - (h["fragvol_r"] or 0.0) / 100.0)
+        if h["om_r"] is not None:
+            soc += (h["om_r"] / 1.724) * vol
+        sic += ((h["caco3_r"] or 0.0) * 0.12) * vol
+    return soc, sic, gaps
 ```
 
 ## Caveats (always surface)
 
-- SSURGO values are **representative/estimated**, not measured at this point. SOC here is a **modeled baseline**, not a field measurement.
-- Real SOC varies with management, tillage, and recent land-use change — a survey value won't capture that.
+- SSURGO values are **representative/estimated**, not measured at this point. These are **modeled baselines**, not field measurements.
+- **SOC and SIC are not interchangeable.** Organic carbon is biologically active and management-sensitive (tillage, cover crops, land-use change shift it on yearly–decadal scales). Inorganic carbon (pedogenic/lithogenic carbonate) is a large, slow pool that turns over on millennial timescales; whether its formation is a net climate sink or source depends on the cation and bicarbonate source, so do not present SIC as readily "sequesterable." Keep them separate.
+- `caco3_r` is **calcium carbonate equivalent** — it does not distinguish pedogenic (formed in place) from inherited/lithogenic carbonate, and the ×0.12 factor assumes calcite (dolomite would differ slightly).
 - SSURGO is 1:24,000-scale mapping: it describes soils **mapped in this area**, not this exact spot.
 - For measured carbon you'd need lab data (KSSL) or on-site sampling — out of scope here.
 
 ## Units
 
-OM/OC in % by weight · bulk density g/cm³ · depth cm · SOC stock t C/ha (= Mg C/ha). 1 t C/ha = 0.1 kg C/m². To CO₂-equivalent: × 3.67.
+OM/OC and CaCO₃/IC in % by weight · bulk density g/cm³ · depth cm · carbon stock t C/ha (= Mg C/ha). 1 t C/ha = 0.1 kg C/m². To CO₂-equivalent: × 3.67.
