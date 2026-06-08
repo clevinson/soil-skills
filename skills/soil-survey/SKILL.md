@@ -1,9 +1,9 @@
 ---
-name: soil-report
-description: Generate a soil report for any US location by querying live USDA SSURGO data. Use when a user asks about the soil at an address, property, parcel, farm, or coordinates — what soil is there, or whether it suits septic systems, building, gardening, farming, vineyards, or other land uses.
+name: soil-survey
+description: Look up the USDA soil survey (SSURGO) for any US location and generate a readable soil report. Use when a user asks about the soil at an address, property, parcel, farm, or coordinates — what soil is there, or whether it suits septic systems, building, gardening, farming, vineyards, or other land uses.
 ---
 
-# Soil Report
+# Soil Survey
 
 Readable soil report for any US location from live USDA data. Two keyless public HTTP APIs — call them with `curl` (shell) or Python (sandbox), whichever your runtime has. Zero installs.
 

@@ -4,9 +4,9 @@ Lightweight Claude skills for live [SSURGO](https://www.nrcs.usda.gov/resources/
 
 ## Skills
 
-### soil-report
+### soil-survey
 
-Give it a US address (or coordinates) and get a readable soil report: what soil is there, its profile and properties, what USDA says works on it (septic, building, lawns), farmland ratings, and water/flooding hazards — all queried live from USDA Soil Data Access.
+Give it a US address (or coordinates) and get a readable soil report: what soil is there, its profile and properties, what USDA says works on it (septic, building, lawns), farmland ratings, and water/flooding hazards — all queried live from the USDA soil survey (SSURGO) via Soil Data Access.
 
 ```
 > what's the soil like at 1024 Olive Dr, Davis CA? could it support a vineyard?
@@ -15,7 +15,7 @@ Give it a US address (or coordinates) and get a readable soil report: what soil 
 **Install:**
 
 ```bash
-npx skills add clevinson/soil-skills@soil-report
+npx skills add clevinson/soil-skills@soil-survey
 ```
 
 ## How it works
