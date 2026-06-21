@@ -147,3 +147,58 @@ def _shapefile_zip_to_wkt(path):
     # __geo_interface__ yields GeoJSON-like geometry
     geoms = [s.__geo_interface__ for s in shapes]
     return max((_geojson_geom_to_wkt(g) for g in geoms), key=approx_acres)
+
+
+# --- Web Soil Survey deep links --------------------------------------------
+
+WSS = "http://websoilsurvey.nrcs.usda.gov/app/WebSoilSurvey.aspx"
+
+
+def _exterior_ring(aoi):
+    """Exterior ring of an AOI as a closed [(lon, lat), ...]. Accepts an Esri geometry
+    dict ({'rings': ...}), GeoJSON (dict/text), or a WKT POLYGON/MULTIPOLYGON string.
+    Holes are dropped; a MULTIPOLYGON/MultiPolygon reduces to its largest part."""
+    if isinstance(aoi, dict) and "rings" in aoi:                       # Esri geometry
+        ring = max(aoi["rings"], key=lambda r: abs(_signed_area([(float(x), float(y)) for x, y in r])))
+        pts = [(float(x), float(y)) for x, y in ring]
+    elif isinstance(aoi, dict):                                        # GeoJSON geometry/feature
+        return _exterior_ring(_geojson_geom_to_wkt(aoi))               # -> POLYGON, largest part
+    else:
+        s = str(aoi).strip()
+        if s.startswith("{"):                                          # GeoJSON text
+            return _exterior_ring(_geojson_geom_to_wkt(json.loads(s)))
+        # WKT: take the first inner ring (the exterior); for MULTIPOLYGON, the first part
+        i = (s.index("(((") + 3) if s.upper().startswith("MULTIPOLYGON") else (s.index("((") + 2)
+        ext = s[i:s.index(")", i)]
+        pts = [(float(a), float(b)) for a, b in (p.split() for p in ext.split(","))]
+    if pts[0] != pts[-1]:
+        pts.append(pts[0])                                             # close the ring
+    return pts
+
+
+def aoi_is_simple_ring(aoi):
+    """True if the AOI is a single closed ring with no holes / no extra parts — i.e. it
+    survives a WSS aoicoords link without losing geometry. Use to decide whether to warn."""
+    if isinstance(aoi, dict) and "rings" in aoi:
+        return len(aoi["rings"]) == 1
+    s = str(aoi).strip().upper()
+    if s.startswith("MULTIPOLYGON"):
+        return False
+    if s.startswith("POLYGON"):
+        return s.count("(") == 2  # POLYGON((...)) — one ring; holes add more "(("
+    return None  # unknown (e.g. GeoJSON) — caller may inspect separately
+
+
+def wss_aoicoords_url(aoi):
+    """AOI (Esri ring / GeoJSON / WKT) -> Web Soil Survey deep link that loads the AOI into
+    the official Soil Map / Soil Data Explorer. Exterior ring only (lon, lat, WGS84); WSS
+    takes a single closed ring with no holes, so warn (via aoi_is_simple_ring) when parts
+    are dropped. Only spaces are %20-encoded; commas and parens are literal (per NRCS)."""
+    ring = _exterior_ring(aoi)
+    body = ",".join(f"{lon} {lat}" for lon, lat in ring)
+    return f"{WSS}?aoicoords=(({body}))".replace(" ", "%20")
+
+
+def wss_marker_url(lon, lat):
+    """Web Soil Survey deep link that drops a pin at a point (the natural point-mode link)."""
+    return f"{WSS}?marker=({lon} {lat})".replace(" ", "%20")

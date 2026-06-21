@@ -15,20 +15,28 @@ These services are external; sandboxes (ChatGPT, claude.ai) block outbound inter
 
 Pick based on what the user asked; all share the same plumbing (see reference.md):
 
-- **Point report** (default) — soil at a single address/coordinate. The workflow below.
-- **Area / parcel** — soils across a parcel/area. **Get the boundary programmatically:** a pasted WKT/GeoJSON/zipped-shapefile → `geo.to_aoi_wkt`; an address/parcel-ID → template **PQ** (parcel fallback chain); else a radius circle around the geocoded point. Sanity-check with `geo.approx_acres`, run **AQ** (returns acreage + `clipped_wkt` per unit), then Q2/Q3/Q4 on the dominant unit(s). Lead with the dominant-units table, and **emit the map + downloadable shapefile/GeoJSON by default** (reference.md "Area-mode outputs").
+- **Point report** — soil at a single address/coordinate. The workflow below. Offer the WSS pin link `geo.wss_marker_url(lon, lat)` as the point-mode companion.
+- **Area / parcel** — soils across a parcel/area. **Get the boundary programmatically:** a pasted WKT/GeoJSON/zipped-shapefile → `geo.to_aoi_wkt`; an address/parcel-ID → template **PQ** (address-field query is the *authoritative* selector — not spatial point-in-poly — then **sanity-gate the returned polygon** with `geo.approx_acres` + ring count); else a radius circle around the geocoded point. Run **AQ** (acreage + `clipped_wkt` per unit), then Q2/Q3/Q4 on the dominant unit(s). Lead with the dominant-units table, and **emit the map + shapefile/GeoJSON + the WSS deep link (`geo.wss_aoicoords_url`) by default** (reference.md "Area-mode outputs").
 - **Compare** — two or more locations. Run the point workflow for each, then a side-by-side table + a short narrative diff.
 - **Series lookup** — the user names a soil series, not a place. Use template **SQ** (taxonomy + extent) plus a representative profile, and link the OSD / SoilWeb. No geocoding.
 
-**Context layers** (any mode): soil + water are inseparable. For "is there a creek / wetland / flood risk," use the tested national ArcGIS templates — **HQ** (NHD streams/ponds), **WQ** (HUC12 watershed), **FQ** (FEMA flood zones), **EQ** (3DEP elevation), **NW** (NWI wetlands — verify host). Cross-check, don't replace, the soil signals.
+### Point vs. parcel — decide scale first (don't silently default)
+
+An address is genuinely ambiguous between "soil at this spot" and "soil across my property," and silently picking point can answer the wrong question. Lean from phrasing; ask only on real ambiguity (always-asking reads as not listening):
+
+- **Lean point** — spot intent: "what soil type is at X", "will a septic system work at X", "pH at my address". A parcel would just add noise.
+- **Lean parcel/area** — possessive or coverage language: "my property", "the lot", "soils *on* X", "how much of X is wet", "farmland classification of X", "all map units within the property line".
+- **Ask** — bare address + generic verb ("give me the soil info at X", "tell me about the soil at X"): a one-tap choice (point vs. whole parcel) costs ~nothing and prevents a wrong-scale answer. Use the elicitation UI (single select, two options). Extra signal: if the geocoded point cheaply shows it sits in an implausibly large or attribute-null parcel (see PQ sanity gate), the bare point is unreliable — prefer the parcel path once you ask.
+  - *Worked example:* "overview of the soil info (and maybe a basic map of the map units) at 20 Taunton Hill Rd" → ambiguous ("overview"+"map of map units" leans area but not decisively) → **ask**. Follow-up "full parcel boundary … all map units within the property line" → explicit parcel mode.
+
+**Context layers** (any mode): soil + water are inseparable. For "is there a creek / wetland / flood risk," use the tested national ArcGIS templates — **HQ** (NHD streams/ponds), **WQ** (HUC12 watershed), **FQ** (FEMA flood zones), **EQ** (3DEP elevation), **NW** (NWI wetlands — probe order in reference.md). Cross-check, don't replace, the soil signals.
 
 ## Workflow
 
-1. **Get coordinates.**
-   - Lat/lon given → use directly.
-   - Street address → Census geocoder (scaffold in reference.md). No match → tell the user (campus buildings, PO boxes, and new construction often miss) and ask for a cross-street or coordinates.
-   - Well-known place name → you may use approximate coordinates from your own knowledge, but disclose that in the report.
-2. **Point → map unit:** template Q1. ⚠️ WKT order is `POINT(lon lat)` — longitude first. Empty `{}` response → outside SSURGO coverage (open water or unmapped): say so and offer to try a nearby point.
+1. **Decide scale, then resolve location.** Infer point vs. parcel/area from the request (see "Point vs. parcel"); if genuinely ambiguous, ask the one-tap choice first.
+   - **Point mode** → get coordinates: lat/lon given → use directly; street address → Census geocoder (no match → say so, ask for a cross-street/coords); well-known place name → approximate coords from your knowledge, disclosed.
+   - **Parcel mode** → fetch the boundary with **PQ**: inspect the parcel layer's schema, query its **address field** (authoritative — not point-in-poly), **sanity-gate** the returned polygon (`geo.approx_acres` + ring count; a residential lot >1,000 ac or >10 rings, or null owner/address, is the wrong enclosing feature → fall back to the address query), then `geo.to_aoi_wkt`.
+2. **Point → map unit:** template Q1. ⚠️ WKT order is `POINT(lon lat)` — longitude first. Empty `{}` response → outside SSURGO coverage (open water or unmapped): say so and offer to try a nearby point. (Parcel mode uses AQ instead — see Modes.)
 3. **Pull data:** templates Q2 (overview), Q3 (components + horizons), Q3b (restrictions), Q4 (interpretations) with the mukey. They are independent — run all four in parallel.
 4. **Write the report.**
 

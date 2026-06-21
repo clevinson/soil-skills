@@ -10,7 +10,7 @@ These are external services; sandboxes (claude.ai, ChatGPT) block outbound inter
 |---|---|---|
 | Geocode | `geocoding.geo.census.gov` | address → point (**core**) |
 | Soils | `sdmdataaccess.sc.egov.usda.gov` | all SSURGO queries (**core**) |
-| Parcels | statewide/county ArcGIS host (varies) — or keyed national (Regrid/ReportAll) | PQ parcel boundary |
+| Parcels | statewide/county host (varies; usually `services*.arcgis.com` ArcGIS Online) — or keyed national (Regrid/ReportAll) | PQ parcel boundary |
 | Hydrography + watershed | `hydro.nationalmap.gov` | HQ (NHD), WQ (WBD/HUC12) |
 | Elevation | `elevation.nationalmap.gov` | EQ (3DEP) |
 | Flood | `hazards.fema.gov` | FQ (FEMA NFHL) |
@@ -92,6 +92,8 @@ rows = resp.get("Table", [])  # [] / no "Table" key = no rows
 ## Query templates
 
 Substitute `{{lon}}`, `{{lat}}`, `{{mukey}}`. Longitude first in POINT — WKT order, the classic trap.
+
+**Quote handling depends on transport.** In **shell** (`curl -d '...'`) the body is single-quoted, so escape single quotes inside SQL by doubling (`''`). In **Python** (`json.dumps`) write single quotes **normally** (`ctg.rvindicator = 'Yes'`) — do **not** double them, or you send invalid SQL and get a 400. The `'Yes'` etc. shown inline in these templates are the literal SQL; only add the `''` doubling when hand-building a shell `-d` string.
 
 ### Q1 — point → mukey
 
@@ -257,6 +259,7 @@ The clipped geometry is in the AQ result — surface it by default:
 
 - **Map.** Render a choropleth of the soil map units clipped to the AOI (color by `muname`), optionally overlaying context layers (NHD flowline, NWI/hydric wet pockets, FEMA zone). A nine-row table becomes the thing people actually want to see.
 - **Downloadable deliverable.** Write the AOI + intersected soil units (and any fetched context layers) as **GeoJSON and/or a zipped shapefile** — WGS84, and for shapefile include a `.prj`. Users are usually headed to WSS / QGIS next; hand them the geometry. Each row's `clipped_wkt` → a GeoJSON Feature carrying that map unit's attributes (muname, mukey, acres).
+- **Web Soil Survey deep link** (`geo.wss_aoicoords_url(aoi)`) — arguably the single most useful deliverable for a soil professional: it loads the AOI straight into the official Soil Map / Soil Data Explorer. Format (per [NRCS WSS URL params](https://www.nrcs.usda.gov/conservation-basics/soil/wss-url-query-parameters)): `…/WebSoilSurvey.aspx?aoicoords=((lon lat,lon lat,…))` — a **single closed WKT ring, WGS84, longitude first**, only spaces `%20`-encoded. ⚠️ WSS takes **one outer ring, no holes / no MULTIPOLYGON** — call `geo.aoi_is_simple_ring(aoi)` and **warn if the AOI has a hole or multiple parts** (an interior cutout is lost). Related WSS params: `aoissa=<areasymbol>` (set AOI to a survey area), `location=(lon lat,…)` (zoom only, no AOI).
 
 ### Compare mode
 
@@ -312,11 +315,18 @@ Address → boundary should be as routine as address → point. **There is no ke
 - **Tier 2 — statewide parcel layer (the realistic keyless default).** Most states publish one standardized ArcGIS parcel service. **Discover, don't hardcode:** search "<state> statewide parcels ArcGIS REST", then **inspect the layer schema** to find the address/owner field — names are wildly inconsistent (`SitusAddr`, `PARCELADDR`, `AddressLine1`, `Location`, `MBL`, `Owner`, `OWNER_NAME`…).
 - **Tier 3 — county/municipal viewer.** Same discover-then-inspect procedure; last resort.
 
-The portable asset is the **inspect-then-query two-step**, verified live (Montana statewide cadastral, `https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/Parcels/MapServer/0`): there the address field is `AddressLine1` and acreage is `GISAcres` — a different schema than any other state, which is exactly why you inspect first. Procedure:
+**Address-field query is the authoritative selector — NOT spatial point-in-polygon.** A geocoded pin can land inside an *enclosing/overlapping* parcel (an open-space tract, a municipal lot) and a spatial query alone returns the wrong feature with no error. Verified live (Newtown CT, 2026-06-21): the geocoded pin's point-in-poly returned a 1,266-ac tract with null `Location`/`Owner`; the address query returned the correct 21.7-ac house lot. Procedure:
 
-1. `GET <parcelLayer>?f=json` → read `fields` → pick the address/owner field (call it `ADDR`).
-2. `arcgis_query(service, layerId, {"where": "<ADDR> LIKE '%<number+street>%'", "outFields": "*", "returnGeometry": "true"})`.
-3. Take the matching feature's geometry → `geo.to_aoi_wkt()` → feed Area mode's `{{aoi_wkt}}`.
+1. **Inspect schema** — `GET <parcelLayer>?f=json` → read `fields` → pick the address field and owner/town fields. Names vary wildly across states (Montana `AddressLine1`/`GISAcres`; Connecticut `Location`/`Town_Name`; elsewhere `SitusAddr`, `PARCELADDR`, `MBL`…) — which is exactly why you inspect first.
+2. **Query that field** (the authoritative step) — `arcgis_query(service, layerId, {"where": "<ADDR> LIKE '%<number+street>%'", "outFields": "*", "returnGeometry": "true"})`, adding a town/municipality filter when the layer has one (`AND <TOWN> = '...'`).
+3. **Spatial point-in-poly is only a tie-breaker** — use it to disambiguate when step 2 returns multiple candidates. Never trust it as the sole selector.
+4. **Sanity-gate the returned polygon** before using it: `geo.approx_acres(feat_geometry)` for plausible size + inspect ring/hole count. A residential lookup returning **>1,000 acres or >10 rings** (or null owner/address attributes) is almost certainly the wrong, enclosing feature — fall back to the address-field query. Then `geo.to_aoi_wkt()` → Area mode's `{{aoi_wkt}}`.
+
+Tested tier-2 layers (illustrative, not canonical — discover the rest):
+- **Montana** statewide cadastral — `https://gisservicemt.gov/arcgis/rest/services/MSDI_Framework/Parcels/MapServer/0` (addr `AddressLine1`, acres `GISAcres`).
+- **Connecticut** statewide parcels 2023 (keyless ArcGIS Online FeatureServer) — `https://services3.arcgis.com/3FL1kr7L4LvwA2Kb/ArcGIS/rest/services/Connecticut_State_Parcel_Layer_2023/FeatureServer/0` (addr `Location` e.g. `20 TAUNTON HILL ROAD`, owner `Owner`, town `Town_Name`; full CAMA attributes; maxRecordCount 2000).
+
+Most statewide layers are hosted on **ArcGIS Online** (`services*.arcgis.com`) — so preflight can probe `services3.arcgis.com` (or the specific org host) for parcel reachability.
 
 Surface the caveat: a parcel polygon is a *cadastral* boundary of varying currency/precision, not a survey.
 
