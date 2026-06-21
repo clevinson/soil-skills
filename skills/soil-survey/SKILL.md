@@ -7,18 +7,20 @@ description: Look up the USDA soil survey (SSURGO) for any US location and gener
 
 Readable soil report for any US location from live USDA data. Two keyless public HTTP APIs — call them with `curl` (shell) or Python (sandbox), whichever your runtime has. Zero installs.
 
-**First, read `reference.md` in this skill's directory** — it has the tested SQL templates (Q1, Q2, Q3, Q3b, Q4, D), the HTTP request specs with shell + Python examples, the network-access note, table docs for ad-hoc queries, and glossaries. Do not compose SDA SQL from scratch when a template fits.
+**First, read `reference.md` in this skill's directory** — it has the tested SQL templates (Q1–Q4, D, AQ, SQ), the HTTP specs with shell + Python examples, the **host roster + preflight**, the **geometry helpers (`geo.py`)**, the **parcel + context-layer ArcGIS templates** (PQ, HQ, WQ, FQ, NW, EQ), table docs, and glossaries. Use a tested template when one fits; do not compose SDA SQL or ArcGIS queries from scratch.
 
-These APIs are external; sandboxes (ChatGPT, claude.ai) block outbound internet by default. If a call fails with a network error, see the "Network access required" note in reference.md (allowlist the two domains, then retry in a fresh conversation).
+These services are external; sandboxes (ChatGPT, claude.ai) block outbound internet by default. **Run the preflight** (reference.md) before building the workflow so you know which capabilities will run vs. degrade — don't discover blocks one dataset at a time. Allowlist by capability (host roster in reference.md), then retry in a fresh conversation. If a host is blocked, follow "Graceful degradation" (offer the parameterized URL + ingest the pasted result); never fabricate.
 
 ## Modes
 
 Pick based on what the user asked; all share the same plumbing (see reference.md):
 
 - **Point report** (default) — soil at a single address/coordinate. The workflow below.
-- **Area** — soils across a parcel/area. If the user pastes a WKT or GeoJSON polygon, use it; otherwise build a radius circle around the geocoded point. Run template **AQ** for the area-weighted map units, then Q2/Q3/Q4 on the dominant unit(s). Lead the report with the dominant-units table (map unit · acres · % of AOI).
+- **Area / parcel** — soils across a parcel/area. **Get the boundary programmatically:** a pasted WKT/GeoJSON/zipped-shapefile → `geo.to_aoi_wkt`; an address/parcel-ID → template **PQ** (parcel fallback chain); else a radius circle around the geocoded point. Sanity-check with `geo.approx_acres`, run **AQ** (returns acreage + `clipped_wkt` per unit), then Q2/Q3/Q4 on the dominant unit(s). Lead with the dominant-units table, and **emit the map + downloadable shapefile/GeoJSON by default** (reference.md "Area-mode outputs").
 - **Compare** — two or more locations. Run the point workflow for each, then a side-by-side table + a short narrative diff.
 - **Series lookup** — the user names a soil series, not a place. Use template **SQ** (taxonomy + extent) plus a representative profile, and link the OSD / SoilWeb. No geocoding.
+
+**Context layers** (any mode): soil + water are inseparable. For "is there a creek / wetland / flood risk," use the tested national ArcGIS templates — **HQ** (NHD streams/ponds), **WQ** (HUC12 watershed), **FQ** (FEMA flood zones), **EQ** (3DEP elevation), **NW** (NWI wetlands — verify host). Cross-check, don't replace, the soil signals.
 
 ## Workflow
 
@@ -44,14 +46,16 @@ If the user asked a specific question ("will a septic system work?"), lead with 
 
 **🚜 Farming** — farmland classification · land capability class with meaning (1 best → 8, subclass letter = the limitation) · NCCPI in context (0–1, higher = more inherently productive).
 
-**💧 Hazards & water** — flooding & ponding frequency · min water table depth (null = none within 2 m) · hydric % · hydrologic soil group with one-line meaning.
+**💧 Hazards & water** — flooding & ponding frequency · min water table depth (null = none within 2 m) · hydric % · hydrologic soil group with one-line meaning. **Cross-check the soil-derived signals against the independent layers when reachable:** SSURGO `flodfreqdcd` vs FEMA NFHL (FQ), and hydric % vs actual NHD streams/ponds (HQ) and NWI wetlands (NW). The HQ template answers "is there a creek/pond on the parcel" directly — prefer it over inferring from hydric soils alone.
 
 For non-soil map units (Water, Urban land, NOTCOM, Pits): report what the map unit is, explain why there is no soil interpretation, offer to check a nearby point.
 
 ## Hard rules
 
-- **Never fabricate a value.** Every number traces to a query response in this conversation. Null field → "not populated in SSURGO", not a guess.
-- **Always include the map-scale caveat.**
-- **API failure → report it honestly** (SDA has bad days; use a ~60s timeout). A network/connection error usually means sandbox internet is blocked — point the user to the allowlist note in reference.md. Offer to retry. Never substitute remembered soil facts for live data.
+- **Never fabricate a value.** Every number traces to a query response in this conversation. Null field → "not populated", not a guess. This extends to the new layers: don't call a stream perennial without its NHD FCode, or assert a flood zone the FEMA query didn't return.
+- **Always include the map-scale / source caveat** — 1:24,000 for SSURGO, and the analogous caveat for each added layer: NHD ~1:24,000 (small channels may be absent), FEMA FIRM effective-date, parcel-data currency/precision (cadastral, not a survey).
+- **National first, local last.** Primary endpoints must have nationwide coverage; state/county parcel services appear only as documented fallback tiers, and the report should **state which tier answered**.
+- **Use `geo.py` for all geometry** (GeoJSON↔WKT, ring/orientation repair, `approx_acres` pre-check) — don't re-implement inline; lon/lat-swap and ring errors fail silently.
+- **API/host failure → report it honestly** (SDA has bad days; use a ~60s timeout). A connection error usually means a blocked host — run the preflight first, and on a block use "Graceful degradation" (parameterized URL + ingest pasted result). Never substitute remembered facts for live data.
 - Show original SSURGO units (cm, µm/s, cm/cm); add friendly conversions in parentheses where it helps.
 - Questions beyond the templates (vineyards, solar, compaction...): run discovery template D — survey areas carry state-specific interpretations — then query the exact rule name it returns.
