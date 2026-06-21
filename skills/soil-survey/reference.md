@@ -361,13 +361,21 @@ Returns `huc12` + `name` — the subwatershed the parcel drains into (e.g. `1802
 
 Cross-check against SSURGO's `flodfreqdcd` (Q2) — same question, independent sources. Caveat: cite the FIRM **effective date**; not all areas have modernized NFHL coverage.
 
-### NW — wetlands — USFWS National Wetlands Inventory  *[endpoint known; service erroring 2026-06-20]*
+### NW — wetlands — USFWS National Wetlands Inventory  *[two services; use whichever is up]*
 
-Canonical endpoint (per FWS "Wetland Web Mapping Services"):
-`https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer`
-— **layer 0 = Wetlands** (polygons; fields `WETLAND_TYPE`, `ATTRIBUTE` = Cowardin code), **table 1 = NWI_Wetland_Codes** (code lookup). Query layer 0 with the standard intersect shape.
+NWI is served two ways. **Probe first; prefer the vector service when it's up, else use the raster.**
 
-Status: this service is returning **HTTP 500 (server-side "Application Error")** from outside a browser as of 2026-06-20, and the `fwsprimary.wim.usgs.gov/server/rest/services/Wetlands*` regional services returned empty — i.e. an **FWS/USGS-side outage**, not a wrong URL or auth (a 500, not a 403). **Always probe the service root (`?f=json`) first; if it 500s, fall back to SSURGO's own `hydclprs` (hydric %, in Q2) as the wetland-adjacent signal and say NWI was unreachable.** If it has recovered, the intersect query and codes table work as above. NWI is a regulatory cross-check, not the only source.
+**A. Vector — richest, gives the Cowardin type** *(currently down, 2026-06-20)*
+`https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer` — **layer 0 = Wetlands** (polygons; fields `WETLAND_TYPE`, `ATTRIBUTE` = Cowardin code), **table 1 = NWI_Wetland_Codes**. Standard intersect query. As of 2026-06-20 it returns **HTTP 500 ("Application Error" / "Could not access any server machines")** — an **FWS-side outage** (a 500, not a 403). Use it when the root (`?f=json`) loads.
+
+**B. Raster — what the official Wetlands Mapper uses; UP and tested 2026-06-20** *(presence + map overlay; no clean type)*
+`https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands_Raster/ImageServer` — a 3-band rendered RGB image, no attribute table. No Referer/token needed.
+- **Presence at a point** — `identify` (point geometry **must** carry its SR, like 3DEP): a colored pixel = an NWI wetland is mapped here; `"value":"NoData"` = none. (Tested: Suisun Marsh → `127, 195, 28`.) The colour follows the NWI legend (greens = emergent/forested, blues = ponds/open water), so it *hints* at class — but **do not report a Cowardin code from a pixel colour**; for the regulatory type use service A when it's back.
+- **Map overlay** — `exportImage?bbox=...&bboxSR=4326&imageSR=4326&size=W,H&format=png&f=image` returns a wetlands PNG to drop on the Area-mode map. (Tested over a Suisun bbox.)
+
+**Related (optional, partial coverage):** NWI also publishes a **Riparian** dataset — `https://fwsprimary.wim.usgs.gov/server/rest/services/Riparian/MapServer` (layer 0 = Riparian, **vector-queryable**, up 2026-06-20). It's mapped only for parts of the western US (layer 1 = "Riparian Mapping Areas" shows where), so it's a supplement for streamside-habitat questions, not a national layer.
+
+**Always:** SSURGO's own `hydric %` (`hydclprs`, Q2) is the always-available wetland-adjacent signal. If the NWI services are down, fall back to it and say NWI was unreachable. NWI is a regulatory cross-check, not the only source.
 
 ### EQ — elevation / slope — USGS 3DEP  *[tested]*
 
