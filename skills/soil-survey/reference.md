@@ -14,7 +14,7 @@ These are external services; sandboxes (claude.ai, ChatGPT) block outbound inter
 | Hydrography + watershed | `hydro.nationalmap.gov` | HQ (NHD), WQ (WBD/HUC12) |
 | Elevation | `elevation.nationalmap.gov` | EQ (3DEP) |
 | Flood | `hazards.fema.gov` | FQ (FEMA NFHL) |
-| Wetlands | USFWS NWI host (migrating — verify) | NW |
+| Wetlands | `fwspublicservices.wim.usgs.gov` (NWI — service erroring as of 2026-06-20, probe first) | NW |
 
 In Claude Code's shell these are generally open. On claude.ai / ChatGPT, allowlist the capabilities the question needs, then start a fresh conversation. If you can't, say so plainly — never fabricate data.
 
@@ -361,9 +361,13 @@ Returns `huc12` + `name` — the subwatershed the parcel drains into (e.g. `1802
 
 Cross-check against SSURGO's `flodfreqdcd` (Q2) — same question, independent sources. Caveat: cite the FIRM **effective date**; not all areas have modernized NFHL coverage.
 
-### NW — wetlands — USFWS National Wetlands Inventory  *[role — verify host]*
+### NW — wetlands — USFWS National Wetlands Inventory  *[endpoint known; service erroring 2026-06-20]*
 
-The NWI public map-service host is **migrating** — the older `*.wim.usgs.gov` / `fws.gov/wetlands` endpoints now redirect or 500 (confirmed 2026-06-20). Discover the current `Wetlands/MapServer` root via the NWI Wetlands Mapper before use; the wetland-polygon layer carries `WETLAND_TYPE` / `ATTRIBUTE` (Cowardin code). **Until the host is confirmed, SSURGO's own `hydclprs` (hydric %, in Q2) is the primary wetland-adjacent signal** — NWI is a regulatory cross-check, not the only source.
+Canonical endpoint (per FWS "Wetland Web Mapping Services"):
+`https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer`
+— **layer 0 = Wetlands** (polygons; fields `WETLAND_TYPE`, `ATTRIBUTE` = Cowardin code), **table 1 = NWI_Wetland_Codes** (code lookup). Query layer 0 with the standard intersect shape.
+
+Status: this service is returning **HTTP 500 (server-side "Application Error")** from outside a browser as of 2026-06-20, and the `fwsprimary.wim.usgs.gov/server/rest/services/Wetlands*` regional services returned empty — i.e. an **FWS/USGS-side outage**, not a wrong URL or auth (a 500, not a 403). **Always probe the service root (`?f=json`) first; if it 500s, fall back to SSURGO's own `hydclprs` (hydric %, in Q2) as the wetland-adjacent signal and say NWI was unreachable.** If it has recovered, the intersect query and codes table work as above. NWI is a regulatory cross-check, not the only source.
 
 ### EQ — elevation / slope — USGS 3DEP  *[tested]*
 
