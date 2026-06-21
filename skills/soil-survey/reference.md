@@ -14,7 +14,7 @@ These are external services; sandboxes (claude.ai, ChatGPT) block outbound inter
 | Hydrography + watershed | `hydro.nationalmap.gov` | HQ (NHD), WQ (WBD/HUC12) |
 | Elevation | `elevation.nationalmap.gov` | EQ (3DEP) |
 | Flood | `hazards.fema.gov` | FQ (FEMA NFHL) |
-| Wetlands | `fwspublicservices.wim.usgs.gov` (NWI — service erroring as of 2026-06-20, probe first) | NW |
+| Wetlands | `fwspublicservices.wim.usgs.gov` (NWI vector, 500 as of 2026-06-20) + `fwsprimary.wim.usgs.gov` (working split/raster) — probe in order | NW |
 
 In Claude Code's shell these are generally open. On claude.ai / ChatGPT, allowlist the capabilities the question needs, then start a fresh conversation. If you can't, say so plainly — never fabricate data.
 
@@ -361,21 +361,27 @@ Returns `huc12` + `name` — the subwatershed the parcel drains into (e.g. `1802
 
 Cross-check against SSURGO's `flodfreqdcd` (Q2) — same question, independent sources. Caveat: cite the FIRM **effective date**; not all areas have modernized NFHL coverage.
 
-### NW — wetlands — USFWS National Wetlands Inventory  *[two services; use whichever is up]*
+### NW — wetlands — USFWS National Wetlands Inventory  *[multiple services; probe in order]*
 
-NWI is served two ways. **Probe first; prefer the vector service when it's up, else use the raster.**
+NWI is served several ways and the production vector service is mid-outage, so **probe in this order and use the first that responds** (each `?f=json` root; treat HTTP 500 / empty as down):
 
-**A. Vector — richest, gives the Cowardin type** *(currently down, 2026-06-20)*
-`https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer` — **layer 0 = Wetlands** (polygons; fields `WETLAND_TYPE`, `ATTRIBUTE` = Cowardin code), **table 1 = NWI_Wetland_Codes**. Standard intersect query. As of 2026-06-20 it returns **HTTP 500 ("Application Error" / "Could not access any server machines")** — an **FWS-side outage** (a 500, not a 403). Use it when the root (`?f=json`) loads.
+**1. Production vector — preferred, gives the Cowardin type** *(currently HTTP 500, 2026-06-20)*
+`https://fwspublicservices.wim.usgs.gov/wetlandsmapservice/rest/services/Wetlands/MapServer` — **layer 0 = Wetlands** (polygons; fields `WETLAND_TYPE`, `ATTRIBUTE` = Cowardin code), **table 1 = NWI_Wetland_Codes**. Single national layer, simplest. As of 2026-06-20 it 500s ("Could not access any server machines" = an FWS-side outage, not auth). Use it the moment its root loads.
 
-**B. Raster — what the official Wetlands Mapper uses; UP and tested 2026-06-20** *(presence + map overlay; no clean type)*
-`https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands_Raster/ImageServer` — a 3-band rendered RGB image, no attribute table. No Referer/token needed.
-- **Presence at a point** — `identify` (point geometry **must** carry its SR, like 3DEP): a colored pixel = an NWI wetland is mapped here; `"value":"NoData"` = none. (Tested: Suisun Marsh → `127, 195, 28`.) The colour follows the NWI legend (greens = emergent/forested, blues = ponds/open water), so it *hints* at class — but **do not report a Cowardin code from a pixel colour**; for the regulatory type use service A when it's back.
-- **Map overlay** — `exportImage?bbox=...&bboxSR=4326&imageSR=4326&size=W,H&format=png&f=image` returns a wetlands PNG to drop on the Area-mode map. (Tested over a Suisun bbox.)
+**2. Split vector — same type data, WORKING and tested 2026-06-20** *(use while #1 is down)*
+`https://fwsprimary.wim.usgs.gov/server/rest/services/Test/Wetlands_gdb_split/MapServer` — **regional layers**, pick by location: **1 = CONUS_East · 2 = CONUS_West · 0 = Alaska · 3 = Hawaii · 4 = PacTrust · 5 = PRVI**. Polygons with `WETLAND_TYPE` + `ATTRIBUTE` (Cowardin). Tested: CONUS_West/layer 2 at Suisun Marsh → "Estuarine and Marine Wetland", `E2EM1N`; CONUS_East/layer 1 at Okefenokee → "Freshwater Pond".
+- Pick West (2) for the western US, East (1) for the eastern; **near the central-US boundary, query both layers and merge.**
+- ⚠️ Field names are **table-qualified** (`Wetlands_CONUS_West.WETLAND_TYPE`): request `outFields=*` and read the keys ending `.WETLAND_TYPE` / `.ATTRIBUTE`.
+- ⚠️ It lives in a **`Test` folder** — likely FWS staging while production is down, so it may move or disappear. Probe it; don't hardcode it as permanent. (When #1 is back, prefer #1.)
 
-**Related (optional, partial coverage):** NWI also publishes a **Riparian** dataset — `https://fwsprimary.wim.usgs.gov/server/rest/services/Riparian/MapServer` (layer 0 = Riparian, **vector-queryable**, up 2026-06-20). It's mapped only for parts of the western US (layer 1 = "Riparian Mapping Areas" shows where), so it's a supplement for streamside-habitat questions, not a national layer.
+**3. Raster — presence + map overlay, always-on** *(no clean type)*
+`https://fwsprimary.wim.usgs.gov/server/rest/services/Wetlands_Raster/ImageServer` — a 3-band rendered RGB image (no attribute table). No Referer/token.
+- **Presence** — `identify` (point geometry must carry its SR): a colored pixel = wetland mapped here (tested Suisun Marsh → `127,195,28`); `"value":"NoData"` = none. Colour hints at class per the NWI legend but **don't report a Cowardin code from a pixel colour** — use #1/#2 for type.
+- **Map overlay** — `exportImage?bbox=...&bboxSR=4326&imageSR=4326&size=W,H&format=png&f=image` → a wetlands PNG for the Area-mode map (tested).
 
-**Always:** SSURGO's own `hydric %` (`hydclprs`, Q2) is the always-available wetland-adjacent signal. If the NWI services are down, fall back to it and say NWI was unreachable. NWI is a regulatory cross-check, not the only source.
+**Related (optional, partial coverage):** NWI's **Riparian** dataset — `https://fwsprimary.wim.usgs.gov/server/rest/services/Riparian/MapServer` (layer 0 = Riparian, vector-queryable; layer 1 = mapped-areas extent). Western-US only — a streamside-habitat supplement, not a national layer.
+
+**Always:** SSURGO's own `hydric %` (`hydclprs`, Q2) is the always-available wetland-adjacent signal. If every NWI service is down, fall back to it and say NWI was unreachable. NWI is a regulatory cross-check, not the only source.
 
 ### EQ — elevation / slope — USGS 3DEP  *[tested]*
 
